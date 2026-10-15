@@ -1,5 +1,27 @@
+# Python
 venv/
-**/venv/
+.venv/
 __pycache__/
 *.pyc
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment
 .env
+.env.*
+!.env.example
+
+# Backup
+snmp-dashboard-backup/
+
+# Logs
+*.log
+
+# System
+.DS_Store
+
+*.db-shm
+*.db-wal

@@ -1,90 +1,121 @@
 import json
-import paramiko
+from datetime import datetime
+
 from kafka import KafkaConsumer
 
+# ==========================================
+# CONFIGURATION
+# ==========================================
+
 KAFKA_SERVER = "localhost:9092"
-TOPIC = "router-commands"
+KAFKA_TOPIC = "snmp"
+GROUP_ID = "snmp-worker"
 
-ROUTERS = {
-    "192.168.31.132": "R1",
-    "192.168.31.133": "R2"
-}
 
-ROUTER_USERNAME = "admin"
-ROUTER_PASSWORD = "cisco"
+# ==========================================
+# KAFKA CONSUMER
+# ==========================================
 
 consumer = KafkaConsumer(
-    TOPIC,
-    bootstrap_servers=KAFKA_SERVER,
-    group_id="router-workers",
-    auto_offset_reset="earliest",
-    value_deserializer=lambda m: json.loads(m.decode("utf-8"))
+    KAFKA_TOPIC,
+
+    bootstrap_servers=[KAFKA_SERVER],
+
+    group_id=GROUP_ID,
+
+    auto_offset_reset="latest",
+
+    enable_auto_commit=True,
+
+    value_deserializer=lambda x: json.loads(
+        x.decode("utf-8")
+    )
 )
 
-print("Worker started")
-print(f"Waiting for messages from topic: {TOPIC}")
+
+# ==========================================
+# PROCESS SNMP DATA
+# ==========================================
+
+def process_traffic(data):
+
+    timestamp = data.get("timestamp", "N/A")
+    router_ip = data.get("router_ip", "Unknown")
+    interface = data.get("interface", "Unknown")
+    if_index = data.get("if_index", "N/A")
+
+    in_octets = data.get("in_octets", 0)
+    out_octets = data.get("out_octets", 0)
+
+    in_mbps = data.get("in_mbps", 0)
+    out_mbps = data.get("out_mbps", 0)
+
+    print("\n" + "=" * 55)
+    print("            SNMP TRAFFIC WORKER")
+    print("=" * 55)
+
+    print(f"Timestamp   : {timestamp}")
+    print(f"Router IP   : {router_ip}")
+    print(f"Interface   : {interface}")
+    print(f"ifIndex     : {if_index}")
+
+    print("-" * 55)
+
+    print(f"IN Octets   : {in_octets:,}")
+    print(f"OUT Octets  : {out_octets:,}")
+
+    print("-" * 55)
+
+    print(f"Input Rate  : {in_mbps:.3f} Mbps")
+    print(f"Output Rate : {out_mbps:.3f} Mbps")
+
+    print("=" * 55)
 
 
-def execute_command(router_ip, command):
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+# ==========================================
+# MAIN
+# ==========================================
+
+def main():
+
+    print("=" * 55)
+    print("             KAFKA SNMP WORKER")
+    print("=" * 55)
+
+    print("Kafka Broker :", KAFKA_SERVER)
+    print("Kafka Topic  :", KAFKA_TOPIC)
+    print("Consumer ID  :", GROUP_ID)
+
+    print("=" * 55)
+
+    print("\nWaiting for SNMP traffic messages...\n")
+
+    for message in consumer:
+
+        try:
+            data = message.value
+
+            process_traffic(data)
+
+        except Exception as error:
+            print("Error processing message:", error)
+
+
+# ==========================================
+# START WORKER
+# ==========================================
+
+if __name__ == "__main__":
 
     try:
-        print(f"\nConnecting to router {router_ip}...")
+        main()
 
-        ssh.connect(
-            hostname=router_ip,
-            username=ROUTER_USERNAME,
-            password=ROUTER_PASSWORD,
-            look_for_keys=False,
-            allow_agent=False,
-            timeout=10
-        )
+    except KeyboardInterrupt:
+        print("\nStopping Kafka Worker...")
 
-        print("SSH connected")
-        print(f"Executing command: {command}")
-
-        stdin, stdout, stderr = ssh.exec_command(command)
-
-        output = stdout.read().decode()
-        error = stderr.read().decode()
-
-        print("\n========== ROUTER OUTPUT ==========")
-
-        if output:
-            print(output)
-
-        if error:
-            print("ERROR:")
-            print(error)
-
-        print("===================================")
-
-    except Exception as e:
-        print(f"SSH Error: {e}")
+    except Exception as error:
+        print("Kafka Error:", error)
 
     finally:
-        ssh.close()
-
-
-for message in consumer:
-    event = message.value
-
-    print("\nReceived Kafka message:")
-    print(json.dumps(event, indent=2))
-
-    router_ip = event.get("router_ip")
-    command = event.get("command")
-
-    router_name = ROUTERS.get(router_ip, "Unknown Router")
-
-    print("\n========== NEW JOB ==========")
-    print(f"Router  : {router_name}")
-    print(f"IP      : {router_ip}")
-    print(f"Command : {command}")
-    print("=============================")
-
-    if router_ip and command:
-        execute_command(router_ip, command)
-    else:
-        print("Invalid Kafka message")
+        consumer.close()
+        print("Kafka Consumer closed.")
